@@ -1,0 +1,7 @@
+build/
+dist/
+*.spec
+Onde.exe
+__pycache__/
+*.pyc
+public/version.txt

@@ -1,0 +1,68 @@
+# Construit Onde-Setup.exe et le publie dans "Releases" à chaque nouvelle version (tag v1.2.3)
+name: Version
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  installeur:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Dépendances
+        run: python -m pip install -U pywebview pyinstaller pillow pystray "yt-dlp[default]" imageio-ffmpeg
+
+      - name: Numéro de version
+        shell: bash
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          [[ "$GITHUB_REF_TYPE" == "tag" ]] || V="0.0.0-test"
+          echo "$V" > public/version.txt
+          echo "APP_VERSION=$V" >> "$GITHUB_ENV"
+
+      - name: Icônes
+        run: python make_icon.py
+
+      - name: Application
+        run: >
+          python -m PyInstaller --noconfirm --clean --windowed --onedir --name Onde --icon onde.ico
+          --add-data "public;public" --collect-all imageio_ffmpeg --collect-all yt_dlp_ejs
+          --collect-submodules yt_dlp --collect-all pystray --hidden-import pystray._win32 onde.py
+
+      - name: Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Installeur
+        shell: pwsh
+        run: |
+          $iscc = Get-ChildItem "${env:ProgramFiles(x86)}\Inno Setup *\ISCC.exe", "$env:ProgramFiles\Inno Setup *\ISCC.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          & $iscc.FullName "/DAppVersion=$env:APP_VERSION" installer.iss
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+      - name: Publier
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
+            && gh release upload "$GITHUB_REF_NAME" dist/Onde-Setup.exe --clobber \
+            || gh release create "$GITHUB_REF_NAME" dist/Onde-Setup.exe --title "Onde $APP_VERSION" \
+                 --notes "Télécharge **Onde-Setup.exe** ci-dessous et lance-le. Si Windows affiche « Windows a protégé votre ordinateur », clique sur *Informations complémentaires* puis *Exécuter quand même*."
+
+      - name: Garder l'installeur (test)
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Onde-Setup
+          path: dist/Onde-Setup.exe
